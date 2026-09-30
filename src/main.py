@@ -1,6 +1,7 @@
 from parser.xlsx_parser import parse_xlsx
 
 
+file_path = "data/uploads/eod.xlsx"
 file_path = "data/uploads/inventory_parser_test.xlsx"
 
 workbook = parse_xlsx(file_path)
@@ -17,10 +18,12 @@ for sheet in workbook["sheets"]:
     print(f"SHEET: {sheet['name']}")
     print("-" * 70)
 
+    dimensions = sheet["dimensions"]
+
     print(
         f"Dimensions: "
-        f"{sheet['dimensions']['max_row']} rows × "
-        f"{sheet['dimensions']['max_column']} columns"
+        f"{dimensions['rows']} rows × "
+        f"{dimensions['columns']} columns"
     )
 
     print(f"Header row: {sheet['header_row']}")
@@ -29,17 +32,31 @@ for sheet in workbook["sheets"]:
 
     for column in sheet["columns"]:
         print(
-            f"  {column['index']}: "
+            f"  {column['coordinate']}: "
             f"{column['name']}"
         )
 
-    print(f"\nData rows: {len(sheet['rows'])}")
+    print(
+        f"\nMerged ranges: "
+        f"{sheet['merged_ranges']}"
+    )
 
-    print("\nFirst 5 rows:")
+    print(
+        f"Blocks detected: "
+        f"{len(sheet['blocks'])}"
+    )
 
-    for row in sheet["rows"][:5]:
+    for block in sheet["blocks"]:
 
         print(
-            f"  Row {row['row_number']}: "
-            f"{row['values']}"
+            f"\n  BLOCK {block['block_id']}"
         )
+
+        print(
+            f"  Rows: {len(block['rows'])}"
+        )
+
+        print("  First 20 rows:")
+
+        for row in block["rows"][:20]:
+            print(f"    {row}")

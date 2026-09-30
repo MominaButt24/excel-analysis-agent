@@ -1,392 +1,287 @@
-from datetime import datetime, date
-import re
-
 from openpyxl import load_workbook
 
-
-def normalize_text(value):
-    """
-    Normalize text without changing its meaning.
-    """
-
-    if value is None:
-        return None
-
-    if isinstance(value, str):
-        value = " ".join(value.split())
-        return value if value else None
-
-    return value
+from parser.normalizer import normalize_value
+from parser.structure import (
+    detect_header_row,
+    detect_actual_header_row,
+    detect_active_columns,
+    detect_parent_headers,
+    detect_blocks,
+    get_row_values,
+    is_empty_row,
+)
 
 
-def normalize_date(value):
-    """
-    Normalize actual Excel dates and common date strings.
+def parse_row(
+    worksheet,
+    row_number,
+    columns,
+    sheet_name,
+):
+    cells = {}
 
-    If a value cannot safely be interpreted as a date,
-    keep the original value.
-    """
+    for column_number in columns:
 
-    if value is None:
-        return None
+        cell = worksheet.cell(
+            row=row_number,
+            column=column_number
+        )
 
-    if isinstance(value, datetime):
-        return value.date().isoformat()
+        value = normalize_value(
+            cell.value
+        )
 
-    if isinstance(value, date):
-        return value.isoformat()
-
-    if not isinstance(value, str):
-        return value
-
-    value = value.strip()
-
-    # Keep non-date text untouched.
-    if not re.search(r"\d", value):
-        return value
-
-    # Normalize repeated separators.
-    normalized = re.sub(r"[-\s]+", "-", value)
-
-    parts = normalized.split("-")
-
-    # Examples:
-    # 12-08-2026
-    # 12-8-26
-    # 21--7-26
-    if len(parts) == 3:
-
-        try:
-            day = int(parts[0])
-            month = int(parts[1])
-            year = int(parts[2])
-
-            if year < 100:
-                year += 2000
-
-            return date(
-                year,
-                month,
-                day
-            ).isoformat()
-
-        except ValueError:
-            pass
-
-    # Example:
-    # 30-726 -> 30-7-26
-    match = re.fullmatch(
-        r"(\d{1,2})-(\d)(\d{2})",
-        normalized
-    )
-
-    if match:
-
-        try:
-            day = int(match.group(1))
-            month = int(match.group(2))
-            year = 2000 + int(match.group(3))
-
-            return date(
-                year,
-                month,
-                day
-            ).isoformat()
-
-        except ValueError:
-            pass
-
-    return value
-
-
-def normalize_value(value):
-    """
-    Normalize a cell value while preserving its meaning.
-    """
-
-    if value is None:
-        return None
-
-    if isinstance(value, (datetime, date)):
-        return normalize_date(value)
-
-    if isinstance(value, str):
-
-        text = normalize_text(value)
-
-        if text is None:
-            return None
-
-        # Try date normalization.
-        normalized_date = normalize_date(text)
-
-        return normalized_date
-
-    return value
-
-
-def is_empty_row(values):
-    """
-    Check whether a complete worksheet row is empty.
-    """
-
-    return all(
-        value is None
-        for value in values
-    )
-
-
-def detect_header_row(worksheet):
-    """
-    Detect a likely table header row.
-
-    This is structural detection only.
-
-    We don't assume:
-    - row 1 is the header
-    - specific column names
-    - a specific spreadsheet type
-
-    A row is considered a possible header when it contains
-    multiple non-empty text values.
-    """
-
-    for row_number in range(
-        1,
-        worksheet.max_row + 1
-    ):
-
-        values = [
-            worksheet.cell(
-                row=row_number,
-                column=column_number
-            ).value
-            for column_number in range(
-                1,
-                worksheet.max_column + 1
-            )
-        ]
-
-        non_empty = [
-            value
-            for value in values
-            if value is not None
-        ]
-
-        if len(non_empty) < 2:
+        if value is None:
             continue
 
-        text_values = [
-            value
-            for value in non_empty
-            if isinstance(value, str)
-        ]
+        cells[cell.coordinate] = {
+            "column": column_number,
+            "value": value,
+        }
 
-        # A header usually contains multiple text labels.
-        if len(text_values) >= 2:
-            return row_number
+    return {
+        "sheet": sheet_name,
+        "row": row_number,
+        "cells": cells,
+    }
 
-    return None
 
-
-def extract_columns(worksheet, header_row):
+def build_columns(
+    worksheet,
+    header_row,
+    active_columns,
+):
     """
-    Extract only columns that contain actual information
-    somewhere in the worksheet.
+    Build actual child columns.
 
-    Excel's max_column can be larger than the real table
-    because of formatting.
+    For normal sheets:
+        header_row = actual header row.
+
+    For grouped sheets:
+        header_row = child header row.
     """
 
-    active_columns = []
+    columns = []
 
-    for column_number in range(
-        1,
-        worksheet.max_column + 1
-    ):
+    for column_number in active_columns:
 
-        has_value = False
-
-        for row_number in range(
-            header_row,
-            worksheet.max_row + 1
-        ):
-
-            value = worksheet.cell(
-                row=row_number,
-                column=column_number
-            ).value
-
-            if value is not None:
-                has_value = True
-                break
-
-        if not has_value:
-            continue
-
-        header_value = worksheet.cell(
+        cell = worksheet.cell(
             row=header_row,
             column=column_number
-        ).value
+        )
 
-        active_columns.append({
+        name = normalize_value(
+            cell.value
+        )
+
+        columns.append({
             "index": column_number,
-            "name": normalize_value(header_value),
+            "name": name,
+            "coordinate": cell.coordinate,
         })
 
-    return active_columns
+    return columns
 
 
-def extract_row(worksheet, row_number, columns):
+def fill_merged_header_names(
+    worksheet,
+    columns,
+    parent_headers,
+):
     """
-    Extract a row using the detected column structure.
-    """
+    Fill child headers represented by merged cells.
 
-    values = {}
+    Handles:
+        Horizontal:
+            A4:C4 = Item Details
+
+        Vertical:
+            H4:H5 = Status
+    """
 
     for column in columns:
 
-        column_name = column["name"]
-
-        value = worksheet.cell(
-            row=row_number,
-            column=column["index"]
-        ).value
-
-        value = normalize_value(value)
-
-        # Preserve duplicate/empty headers safely.
-        if column_name is None:
-            key = f"column_{column['index']}"
-
-        else:
-            key = str(column_name)
-
-        if key in values:
-            key = f"{key}_{column['index']}"
-
-        values[key] = value
-
-    return values
-
-
-def parse_merged_ranges(worksheet):
-    """
-    Preserve merged-cell information.
-    """
-
-    return [
-        str(range_)
-        for range_ in worksheet.merged_cells.ranges
-    ]
-
-
-def parse_xlsx(file_path: str):
-
-    workbook = load_workbook(
-        file_path,
-        data_only=True
-    )
-
-    workbook_data = {
-        "file": file_path,
-        "sheets": []
-    }
-
-    for worksheet in workbook.worksheets:
-
-        header_row = detect_header_row(worksheet)
-
-        sheet_data = {
-            "name": worksheet.title,
-            "dimensions": {
-                "max_row": worksheet.max_row,
-                "max_column": worksheet.max_column,
-            },
-            "merged_ranges": parse_merged_ranges(
-                worksheet
-            ),
-            "header_row": header_row,
-            "columns": [],
-            "rows": [],
-        }
-
-        # No header detected.
-        #
-        # Still preserve the sheet's raw structure.
-        if header_row is None:
-
-            for row_number in range(
-                1,
-                worksheet.max_row + 1
-            ):
-
-                raw_values = [
-                    normalize_value(
-                        worksheet.cell(
-                            row=row_number,
-                            column=column_number
-                        ).value
-                    )
-                    for column_number in range(
-                        1,
-                        worksheet.max_column + 1
-                    )
-                ]
-
-                if is_empty_row(raw_values):
-                    continue
-
-                sheet_data["rows"].append({
-                    "row_number": row_number,
-                    "values": raw_values,
-                })
-
-            workbook_data["sheets"].append(
-                sheet_data
-            )
-
+        if column["name"] is not None:
             continue
 
-        # Header found.
-        sheet_data["columns"] = extract_columns(
+        column_number = column["index"]
+
+        header_row = worksheet[
+            column["coordinate"]
+        ].row
+
+        for merged_range in worksheet.merged_cells.ranges:
+
+            if column_number not in range(
+                merged_range.min_col,
+                merged_range.max_col + 1
+            ):
+                continue
+
+            if header_row not in range(
+                merged_range.min_row,
+                merged_range.max_row + 1
+            ):
+                continue
+
+            value = worksheet.cell(
+                row=merged_range.min_row,
+                column=merged_range.min_col
+            ).value
+
+            if value is not None:
+                column["name"] = str(value).strip()
+                break
+
+    return columns
+
+
+def parse_sheet(worksheet):
+
+    detected_header_row = detect_header_row(
+        worksheet
+    )
+
+    actual_header_row = detect_actual_header_row(
+        worksheet,
+        detected_header_row
+    )
+
+    active_columns = detect_active_columns(
+        worksheet,
+        start_row=actual_header_row or 1,
+    )
+
+    parent_headers = detect_parent_headers(
+        worksheet,
+        detected_header_row,
+        actual_header_row,
+    )
+
+    columns = []
+
+    if actual_header_row:
+
+        columns = build_columns(
             worksheet,
-            header_row
+            actual_header_row,
+            active_columns,
         )
 
-        # Extract rows after header.
+        columns = fill_merged_header_names(
+            worksheet,
+            columns,
+            parent_headers,
+        )
+
+    blocks = []
+
+    if actual_header_row:
+
+        detected_blocks = detect_blocks(
+            worksheet,
+            actual_header_row + 1,
+        )
+
+        for block_index, row_numbers in enumerate(
+            detected_blocks,
+            start=1
+        ):
+
+            rows = []
+
+            for row_number in row_numbers:
+
+                row = parse_row(
+                    worksheet,
+                    row_number,
+                    active_columns,
+                    worksheet.title,
+                )
+
+                if row["cells"]:
+                    rows.append(row)
+
+            if rows:
+
+                blocks.append({
+                    "block_id": block_index,
+                    "rows": rows,
+                })
+
+    else:
+
+        rows = []
+
         for row_number in range(
-            header_row + 1,
+            1,
             worksheet.max_row + 1
         ):
 
-            raw_values = [
-                worksheet.cell(
-                    row=row_number,
-                    column=column_number
-                ).value
-                for column_number in range(
-                    1,
-                    worksheet.max_column + 1
-                )
-            ]
-
-            if is_empty_row(raw_values):
-                continue
-
-            row_values = extract_row(
+            values = get_row_values(
                 worksheet,
-                row_number,
-                sheet_data["columns"]
+                row_number
             )
 
-            sheet_data["rows"].append({
-                "row_number": row_number,
-                "values": row_values,
+            if is_empty_row(values):
+                continue
+
+            row = parse_row(
+                worksheet,
+                row_number,
+                active_columns,
+                worksheet.title,
+            )
+
+            rows.append(row)
+
+        if rows:
+
+            blocks.append({
+                "block_id": 1,
+                "rows": rows,
             })
 
-        workbook_data["sheets"].append(
-            sheet_data
-        )
+    return {
+        "name": worksheet.title,
 
-    return workbook_data
+        "dimensions": {
+            "rows": worksheet.max_row,
+            "columns": worksheet.max_column,
+        },
+
+        # Keep the original detected row for
+        # backwards compatibility.
+        "header_row": detected_header_row,
+
+        # New semantic header information.
+        "actual_header_row": actual_header_row,
+
+        "parent_headers": parent_headers,
+
+        "columns": columns,
+
+        "merged_ranges": [
+            str(r)
+            for r in worksheet.merged_cells.ranges
+        ],
+
+        "blocks": blocks,
+    }
+
+
+def parse_xlsx(file_path):
+
+    workbook = load_workbook(
+        file_path,
+        data_only=True,
+    )
+
+    return {
+        "file": file_path,
+
+        "sheets": [
+            parse_sheet(worksheet)
+            for worksheet in workbook.worksheets
+        ],
+    }
