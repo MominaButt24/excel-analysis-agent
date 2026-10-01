@@ -258,6 +258,135 @@ def filter_rows(
 
     return results
 
+def filter_rows_multiple(rows, conditions):
+    """
+    Apply multiple filter conditions using AND logic.
+
+    Supports:
+        column -> fixed value
+
+    and:
+        column -> another column
+
+    Also supports grouped/implicitly repeated values
+    through forward-fill semantics.
+    """
+
+    forward_filled = {}
+
+    for condition in conditions:
+        column = condition["column"]
+
+        if column not in forward_filled:
+            forward_filled[column] = forward_fill_column(
+                rows,
+                column,
+            )
+
+        if "value_from_column" in condition:
+
+            other_column = condition["value_from_column"]
+
+            if other_column not in forward_filled:
+                forward_filled[other_column] = (
+                    forward_fill_column(
+                        rows,
+                        other_column,
+                    )
+                )
+
+    results = []
+
+    for row in rows:
+
+        row_number = row["row"]
+
+        matched = True
+
+        for condition in conditions:
+
+            left_value = forward_filled[
+                condition["column"]
+            ][row_number]
+
+            if "value_from_column" in condition:
+
+                right_value = forward_filled[
+                    condition["value_from_column"]
+                ][row_number]
+
+            else:
+
+                right_value = condition.get("value")
+
+            operator = condition["operator"]
+
+            try:
+
+                if operator == "==":
+
+                    if isinstance(left_value, str) and isinstance(
+                        right_value, str
+                    ):
+                        condition_match = (
+                            left_value.strip().lower()
+                            == right_value.strip().lower()
+                        )
+                    else:
+                        condition_match = (
+                            left_value == right_value
+                        )
+
+                elif operator == "!=":
+
+                    if isinstance(left_value, str) and isinstance(
+                        right_value, str
+                    ):
+                        condition_match = (
+                            left_value.strip().lower()
+                            != right_value.strip().lower()
+                        )
+                    else:
+                        condition_match = (
+                            left_value != right_value
+                        )
+
+                elif operator == ">":
+                    condition_match = (
+                        left_value > right_value
+                    )
+
+                elif operator == "<":
+                    condition_match = (
+                        left_value < right_value
+                    )
+
+                elif operator == ">=":
+                    condition_match = (
+                        left_value >= right_value
+                    )
+
+                elif operator == "<=":
+                    condition_match = (
+                        left_value <= right_value
+                    )
+
+                else:
+                    raise ValueError(
+                        f"Unsupported operator: {operator}"
+                    )
+
+            except TypeError:
+                condition_match = False
+
+            if not condition_match:
+                matched = False
+                break
+
+        if matched:
+            results.append(row)
+
+    return results
 
 def sort_rows(
     rows,
@@ -297,3 +426,32 @@ def sort_rows(
         key=sort_key,
         reverse=descending,
     )
+
+def forward_fill_column(rows, column):
+    """
+    Return row-level values for a column, carrying the
+    last non-empty value forward.
+
+    The original parsed rows are not modified.
+    """
+
+    filled_values = {}
+
+    current_value = None
+
+    for row in rows:
+        row_number = row["row"]
+
+        value = None
+
+        for coordinate, cell in row["cells"].items():
+            if coordinate.startswith(column):
+                value = cell["value"]
+                break
+
+        if value is not None:
+            current_value = value
+
+        filled_values[row_number] = current_value
+
+    return filled_values

@@ -8,9 +8,18 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.142.2",
+    "gradio>=6.29.0",
+    "langchain>=1.4.3",
+    "langchain-cerebras>=0.8.2",
+    "langfuse>=4.16.0",
     "openpyxl>=3.1.5",
     "pandas>=3.0.6",
+    "prometheus-client>=0.26.0",
     "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
+    "requests>=2.34.2",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]

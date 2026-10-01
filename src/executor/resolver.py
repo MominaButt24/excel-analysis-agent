@@ -70,3 +70,60 @@ def resolve_column(
     raise ValueError(
         f"Sheet '{sheet_name}' not found."
     )
+
+def resolve_plan_columns(
+    parsed_workbook,
+    plan,
+):
+    """
+    Resolve and validate every column referenced
+    by an ExecutionPlan.
+    """
+
+    resolved = {}
+
+    if plan.column:
+        resolved["column"] = resolve_column(
+            parsed_workbook,
+            plan.sheet,
+            plan.column,
+        )
+
+    if plan.filters:
+
+        resolved_filters = []
+
+        for condition in plan.filters:
+
+            column = resolve_column(
+                parsed_workbook,
+                plan.sheet,
+                condition["column"],
+            )
+
+            resolved_condition = {
+                **condition,
+                "column": column["column"],
+            }
+
+            if "value_from_column" in condition:
+
+                comparison_column = resolve_column(
+                    parsed_workbook,
+                    plan.sheet,
+                    condition[
+                        "value_from_column"
+                    ],
+                )
+
+                resolved_condition[
+                    "value_from_column"
+                ] = comparison_column["column"]
+
+            resolved_filters.append(
+                resolved_condition
+            )
+
+        resolved["filters"] = resolved_filters
+
+    return resolved
