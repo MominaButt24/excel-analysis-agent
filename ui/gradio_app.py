@@ -1,14 +1,20 @@
+import os
+
 import requests
 import gradio as gr
 
+from src.config.logging_config import configure_logging
 
-API_URL = "http://127.0.0.1:8000"
+logger = configure_logging().getChild("frontend")
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 
 
 def upload_file(file):
     if file is None:
         return "", "Please upload an XLSX file."
 
+    filename = os.path.basename(file)
+    logger.info("Upload requested filename=%s", filename)
     try:
         with open(file, "rb") as f:
             response = requests.post(
@@ -25,6 +31,12 @@ def upload_file(file):
         response.raise_for_status()
 
         data = response.json()
+        logger.info(
+            "Upload complete file_id=%s filename=%s sheets=%d",
+            data["file_id"],
+            filename,
+            len(data.get("sheets", [])),
+        )
 
         return (
             data["file_id"],
@@ -32,6 +44,7 @@ def upload_file(file):
         )
 
     except Exception as exc:
+        logger.exception("Upload failed filename=%s", filename)
         return "", f"Upload failed: {exc}"
 
 
@@ -42,6 +55,7 @@ def ask_question(file_id, query):
     if not query.strip():
         return "Please enter a question."
 
+    logger.info("Query requested file_id=%s", file_id)
     try:
         response = requests.post(
             f"{API_URL}/query",
@@ -54,6 +68,11 @@ def ask_question(file_id, query):
         response.raise_for_status()
 
         data = response.json()
+        logger.info(
+            "Query complete file_id=%s valid=%s",
+            file_id,
+            data.get("valid"),
+        )
 
         return data.get(
             "answer",
@@ -61,6 +80,7 @@ def ask_question(file_id, query):
         )
 
     except Exception as exc:
+        logger.exception("Query failed file_id=%s", file_id)
         return f"Query failed: {exc}"
 
 
@@ -141,6 +161,7 @@ with gr.Blocks(
         if not current_query.strip():
             return "Please enter a question.", {}
 
+        logger.info("Query requested file_id=%s", current_file_id)
         try:
             response = requests.post(
                 f"{API_URL}/query",
@@ -153,6 +174,12 @@ with gr.Blocks(
             response.raise_for_status()
 
             data = response.json()
+            logger.info(
+                "Query complete file_id=%s operation=%s valid=%s",
+                current_file_id,
+                data.get("plan", {}).get("operation"),
+                data.get("valid"),
+            )
 
             return (
                 data.get(
@@ -170,6 +197,7 @@ with gr.Blocks(
             )
 
         except Exception as exc:
+            logger.exception("Query failed file_id=%s", current_file_id)
             return f"Query failed: {exc}", {}
 
     analyze.click(
@@ -182,5 +210,5 @@ with gr.Blocks(
 if __name__ == "__main__":
     demo.launch(
         server_name="127.0.0.1",
-        server_port=7860,
+        server_port=int(os.getenv("GRADIO_SERVER_PORT", "7860")),
     )

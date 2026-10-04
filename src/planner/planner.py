@@ -100,6 +100,11 @@ question into a structured execution plan.
 You MUST only reference sheets and columns that
 exist in the provided workbook metadata.
 
+When a header name is duplicated, use its field_id
+to identify the intended column. For example, use
+"C" rather than "Qty" when metadata shows two
+columns named "Qty" with field_ids "C" and "D".
+
 Do not calculate any values yourself.
 
 Choose the operation that best matches the user's
@@ -114,6 +119,17 @@ Available operations:
 - search
 - filter
 - sort
+
+For questions asking "how many" or "how much", use count or an aggregate
+operation instead of search. For attendance questions asking how many employees
+were present on a date, use count with filters for the date and the presence
+status. Do not use search as a substitute for counting matching records.
+
+For "list", "show", or "which products/records" requests, use filter and
+include every condition stated by the user. A filter plan with no conditions
+means return all data rows from the selected sheet. If the query names a
+category using a singular/plural variation, select the matching canonical
+category value shown in workbook data.
 
 For comparisons between two spreadsheet columns,
 use value_from_column.

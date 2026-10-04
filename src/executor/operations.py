@@ -1,4 +1,22 @@
 from typing import Any
+from datetime import date
+from openpyxl.utils.cell import column_index_from_string
+from parser.normalizer import normalize_value
+
+
+def get_row_value(row, column):
+    values = row.get("values")
+
+    if values is not None:
+        return values.get(column)
+
+    column_index = column_index_from_string(column)
+
+    for cell in row["cells"].values():
+        if cell["column"] == column_index:
+            return cell["value"]
+
+    return None
 
 def get_rows(parsed_workbook):
     """
@@ -57,16 +75,11 @@ def get_column_values(rows, column):
         get_column_values(rows, "D")
     """
 
-    values = []
-
-    for row in rows:
-
-        for coordinate, cell in row["cells"].items():
-
-            if coordinate.startswith(column):
-                values.append(cell["value"])
-
-    return values
+    return [
+        value
+        for row in rows
+        if (value := get_row_value(row, column)) is not None
+    ]
 
 
 def count(rows):
@@ -126,7 +139,7 @@ def average(rows, column):
 
 
 def minimum(rows, column):
-    """Find minimum numeric value."""
+    """Find the minimum numeric value or earliest ISO date."""
 
     values = get_column_values(
         rows,
@@ -140,14 +153,15 @@ def minimum(rows, column):
         and not isinstance(value, bool)
     ]
 
-    if not numeric_values:
-        return None
+    if numeric_values:
+        return min(numeric_values)
 
-    return min(numeric_values)
+    date_values = _iso_date_values(values)
+    return min(date_values) if date_values else None
 
 
 def maximum(rows, column):
-    """Find maximum numeric value."""
+    """Find the maximum numeric value or latest ISO date."""
 
     values = get_column_values(
         rows,
@@ -161,10 +175,24 @@ def maximum(rows, column):
         and not isinstance(value, bool)
     ]
 
-    if not numeric_values:
-        return None
+    if numeric_values:
+        return max(numeric_values)
 
-    return max(numeric_values)
+    date_values = _iso_date_values(values)
+    return max(date_values) if date_values else None
+
+
+def _iso_date_values(values):
+    if not values or not all(isinstance(value, str) for value in values):
+        return []
+
+    for value in values:
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            return []
+
+    return values
 
 
 def search(rows, column, query):
@@ -174,22 +202,13 @@ def search(rows, column, query):
 
     results = []
 
-    query = str(query).lower()
+    query = str(normalize_value(str(query))).lower()
 
     for row in rows:
+        value = get_row_value(row, column)
 
-        for coordinate, cell in row["cells"].items():
-
-            if not coordinate.startswith(column):
-                continue
-
-            value = cell["value"]
-
-            if value is None:
-                continue
-
-            if query in str(value).lower():
-                results.append(row)
+        if value is not None and query in str(value).lower():
+            results.append(row)
 
     return results
 
@@ -215,46 +234,30 @@ def filter_rows(
     results = []
 
     for row in rows:
+        cell_value = get_row_value(row, column)
 
-        for coordinate, cell in row["cells"].items():
+        try:
+            if operator == "==":
+                matched = cell_value == value
+            elif operator == "!=":
+                matched = cell_value != value
+            elif operator == ">":
+                matched = cell_value > value
+            elif operator == "<":
+                matched = cell_value < value
+            elif operator == ">=":
+                matched = cell_value >= value
+            elif operator == "<=":
+                matched = cell_value <= value
+            else:
+                raise ValueError(
+                    f"Unsupported operator: {operator}"
+                )
+        except TypeError:
+            matched = False
 
-            if not coordinate.startswith(column):
-                continue
-
-            cell_value = cell["value"]
-
-            try:
-
-                if operator == "==":
-                    matched = cell_value == value
-
-                elif operator == "!=":
-                    matched = cell_value != value
-
-                elif operator == ">":
-                    matched = cell_value > value
-
-                elif operator == "<":
-                    matched = cell_value < value
-
-                elif operator == ">=":
-                    matched = cell_value >= value
-
-                elif operator == "<=":
-                    matched = cell_value <= value
-
-                else:
-                    raise ValueError(
-                        f"Unsupported operator: {operator}"
-                    )
-
-            except TypeError:
-                matched = False
-
-            if matched:
-                results.append(row)
-
-            break
+        if matched:
+            results.append(row)
 
     return results
 
@@ -272,52 +275,27 @@ def filter_rows_multiple(rows, conditions):
     through forward-fill semantics.
     """
 
-    forward_filled = {}
-
-    for condition in conditions:
-        column = condition["column"]
-
-        if column not in forward_filled:
-            forward_filled[column] = forward_fill_column(
-                rows,
-                column,
-            )
-
-        if "value_from_column" in condition:
-
-            other_column = condition["value_from_column"]
-
-            if other_column not in forward_filled:
-                forward_filled[other_column] = (
-                    forward_fill_column(
-                        rows,
-                        other_column,
-                    )
-                )
-
     results = []
 
     for row in rows:
-
-        row_number = row["row"]
-
         matched = True
 
         for condition in conditions:
-
-            left_value = forward_filled[
-                condition["column"]
-            ][row_number]
+            left_value = get_row_value(
+                row,
+                condition["column"],
+            )
 
             if "value_from_column" in condition:
-
-                right_value = forward_filled[
-                    condition["value_from_column"]
-                ][row_number]
+                right_value = get_row_value(
+                    row,
+                    condition["value_from_column"],
+                )
 
             else:
-
-                right_value = condition.get("value")
+                right_value = normalize_value(
+                    condition.get("value")
+                )
 
             operator = condition["operator"]
 
@@ -401,13 +379,7 @@ def sort_rows(
     """
 
     def get_value(row):
-
-        for coordinate, cell in row["cells"].items():
-
-            if coordinate.startswith(column):
-                return cell["value"]
-
-        return None
+        return get_row_value(row, column)
 
     def sort_key(row):
 

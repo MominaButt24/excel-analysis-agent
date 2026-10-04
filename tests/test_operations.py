@@ -10,6 +10,7 @@ from executor.operations import (
     search,
     filter_rows,
     sort_rows,
+    get_column_values,
 )
 
 
@@ -109,3 +110,28 @@ def test_maximum():
     result = maximum(rows, "A")
 
     assert isinstance(result, (int, float))
+
+
+def test_column_lookup_does_not_confuse_a_with_aa():
+    rows = [{
+        "row": 2,
+        "cells": {
+            "A2": {"column": 1, "value": 10},
+            "AA2": {"column": 27, "value": 100},
+        },
+    }]
+
+    assert get_column_values(rows, "A") == [10]
+    assert get_column_values(rows, "AA") == [100]
+
+
+def test_search_normalizes_day_first_date_query():
+    rows = [{
+        "row": 2,
+        "values": {"C": "2026-08-20"},
+        "cells": {},
+    }]
+
+    result = search(rows, "C", "20-08-2026")
+
+    assert len(result) == 1

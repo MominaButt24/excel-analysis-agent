@@ -318,6 +318,14 @@ def build_sheet_metadata(sheet):
         columns.append({
             "name": column["name"],
             "column": column_letter(coordinate),
+            "field_id": column.get(
+                "field_id",
+                column_letter(coordinate),
+            ),
+            "inferred_type": column.get(
+                "inferred_type",
+                "unknown",
+            ),
         })
 
     return {

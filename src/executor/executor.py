@@ -25,7 +25,11 @@ def get_sheet_rows(sheet):
     rows = []
 
     for block in sheet["blocks"]:
-        rows.extend(block["rows"])
+        rows.extend(
+            row
+            for row in block["rows"]
+            if row.get("kind", "data") == "data"
+        )
 
     return rows
 
@@ -162,16 +166,7 @@ def execute_plan(parsed_workbook, plan):
         )
 
     if operation == "filter":
-
-        if not plan.filters:
-            raise ValueError(
-                "Filter operation requires filters."
-            )
-
-        return filter_rows_multiple(
-            rows,
-            plan.filters,
-        )
+        return rows
 
     if operation == "sort":
         if not column:

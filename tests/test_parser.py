@@ -79,3 +79,71 @@ def test_merged_ranges_are_preserved():
     )
 
     assert "A2:H2" in momna["merged_ranges"]
+
+
+def test_records_resolve_vertically_merged_values():
+    workbook = parse_xlsx(
+        "data/uploads/inventory_parser_test.xlsx"
+    )
+
+    inventory = next(
+        sheet
+        for sheet in workbook["sheets"]
+        if sheet["name"] == "Inventory"
+    )
+    rows = [
+        row
+        for block in inventory["blocks"]
+        for row in block["rows"]
+    ]
+    keyboard_row = next(
+        row
+        for row in rows
+        if row["row"] == 7
+    )
+
+    assert keyboard_row["values"]["A"] == "Electronics"
+    assert "A7" not in keyboard_row["cells"]
+
+
+def test_summary_and_note_rows_are_classified():
+    workbook = parse_xlsx(
+        "data/uploads/inventory_parser_test.xlsx"
+    )
+
+    inventory = next(
+        sheet
+        for sheet in workbook["sheets"]
+        if sheet["name"] == "Inventory"
+    )
+    row_kinds = {
+        row["row"]: row["kind"]
+        for block in inventory["blocks"]
+        for row in block["rows"]
+    }
+
+    assert row_kinds[24] == "summary"
+    assert row_kinds[26] == "note"
+
+
+def test_numeric_text_is_coerced_in_canonical_record_only():
+    workbook = parse_xlsx(
+        "data/uploads/inventory_parser_test.xlsx"
+    )
+
+    edge_cases = next(
+        sheet
+        for sheet in workbook["sheets"]
+        if sheet["name"] == "Messy_EdgeCases"
+    )
+    row = next(
+        row
+        for block in edge_cases["blocks"]
+        for row in block["rows"]
+        if row["row"] == 6
+    )
+
+    assert row["values"]["C"] == 45
+    assert row["values"]["E"] == 48.0
+    assert row["cells"]["C6"]["value"] == "45"
+    assert row["cells"]["E6"]["value"] == "48.00"

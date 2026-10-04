@@ -31,6 +31,26 @@ def resolve_column(
 
         matches = []
 
+        if target and target.isalpha():
+            letter_matches = []
+
+            for column in sheet["columns"]:
+                coordinate = column["coordinate"]
+                column_letter = re.match(
+                    r"[A-Z]+",
+                    coordinate,
+                ).group()
+
+                if column_letter.lower() == target:
+                    letter_matches.append({
+                        "column": column_letter,
+                        "header": column["name"],
+                        "coordinate": coordinate,
+                    })
+
+            if len(letter_matches) == 1:
+                return letter_matches[0]
+
         for column in sheet["columns"]:
 
             header = normalize_name(
@@ -123,6 +143,7 @@ def resolve_plan_columns(
             resolved_filters.append(
                 resolved_condition
             )
+            print("resolve plan colums from inside the esolve_plan_columns function", resolved_filters)
 
         resolved["filters"] = resolved_filters
 
