@@ -19,7 +19,7 @@ module.exports = {
       cwd: __dirname,
       interpreter: "none",
       env: {
-        API_URL: "http://0.0.0.0:8000",
+        API_URL: "http://127.0.0.1:8000",
         GRADIO_SERVER_PORT: "7861",
         GRADIO_ANALYTICS_ENABLED: "False",
         LOG_LEVEL: "INFO",
